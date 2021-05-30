@@ -1,5 +1,6 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import {firestore} from "firebase-admin";
 
 export const onFixturePlayerStatCreate = functions.firestore
     .document("/football-leagues/premierleague/leagues/{leagueId}" +
@@ -22,7 +23,6 @@ export const onFixturePlayerStatCreate = functions.firestore
       functions.logger.info(`Home Team ID: ${homeTeam.team_id}
          Away Team ID: ${awayTeam.team_id}`);
 
-      const allPromises: Promise<FirebaseFirestore.WriteResult>[] = [];
       if (homeTeam.team_id) {
         const teamSnapshot = await ref.collection("/teams")
             .where("team_id", "==", homeTeam.team_id).get();
@@ -31,12 +31,7 @@ export const onFixturePlayerStatCreate = functions.firestore
         } else {
           functions.logger.debug("Home Team: " + homeTeam.team_id);
           const teamId: number = homeTeam.team_id;
-          const promise = updatePlayer(leagueId, teamId, homeTeam);
-          promise.then((homePromises) =>{
-            allPromises.concat(homePromises);
-          }).catch((error) =>{
-            functions.logger.error(error);
-          });
+          await updateAllPlayers(leagueId, teamId, homeTeam);
         }
       }
 
@@ -48,23 +43,9 @@ export const onFixturePlayerStatCreate = functions.firestore
         } else {
           functions.logger.debug("Home Team: " + homeTeam.team_id);
           const teamId: number = awayTeam.team_id;
-          const promise = updatePlayer(leagueId, teamId, awayTeam);
-          promise.then((awayPromises) =>{
-            allPromises.concat(awayPromises);
-          }).catch((error) =>{
-            functions.logger.error(error);
-          });
+          await updateAllPlayers(leagueId, teamId, awayTeam);
         }
       }
-
-      functions.logger.info(`Total write requests: ${allPromises.length}`);
-      allPromises.forEach((promise) =>{
-        promise.then((result) =>{
-          functions.logger.info(result);
-        }).catch((error) =>{
-          functions.logger.error(error);
-        });
-      });
       return;
     });
 
@@ -74,46 +55,84 @@ export const onFixturePlayerStatCreate = functions.firestore
  * @param {number} teamId ID of a team
  * @param {any} team Team data
  * @param {QueryDocumentSnapshot} snapshot Snapshot of trigger document
- * @return {Promise<Promise<FirebaseFirestore.WriteResult>[]>}
  */
-async function updatePlayer(leagueId: number, teamId: number, team: any)
-      : Promise<Promise<FirebaseFirestore.WriteResult>[]> {
-  const promises:Promise<FirebaseFirestore.WriteResult>[] = [];
-  try {
-    const players = team["statistics"];
-    const promises:Promise<FirebaseFirestore.WriteResult>[] = [];
-    players.forEach(async function(player:any) {
-      const playerId:string = player.player_id;
-      functions.logger.info(`TeamID: ${teamId} PlayerID: ${playerId}`);
-      
-      const playerSnapshot = admin.firestore()
-          .collection("/football-leagues/premierleague/leagues/" +
-            leagueId + "/teams/teamId_" + teamId + "/squad").doc(""+playerId);
-      const playerData = await playerSnapshot.get();
+async function updateAllPlayers(leagueId: number, teamId: number, team: any) {
+  const players = team["statistics"];
+  players.forEach(async function(player:any) {
+    await updatePlayer(leagueId, teamId, player);
+  });
+}
 
-      if (!playerData.exists) {
-        functions.logger.info(`Player does not exist in team ${teamId}.
-          Creating a new document for playerId: ${playerId}`);
-
-        const create = playerSnapshot
-            .set(getPlayer(teamId, player, undefined, true));
-        promises.push(create);
+/**
+ * Create or update a player data
+ * @param {number} leagueId
+ * @param {number} teamId
+ * @param {any} player
+ */
+async function updatePlayer(leagueId: number, teamId: number, player: any) {
+  const playerId:string = player.player_id;
+  functions.logger.info(`TeamID: ${teamId} PlayerID: ${playerId}`);
+  const playerRef = admin.firestore()
+      .collection("/football-leagues/premierleague/leagues/" +
+          leagueId + "/teams/teamId_" + teamId + "/squad").doc(""+playerId);
+  const transactionTask = async (transaction: firestore.Transaction) => {
+    const playerDoc = await transaction.get(playerRef);
+    if (!playerDoc.exists) {
+      functions.logger.info(`Player does not exist in team ${teamId}.
+        Creating a new document for playerId: ${playerId}`);
+      return transaction.set(playerRef, getPlayer(teamId,
+          player, undefined, true), {merge: true});
+    } else {
+      functions.logger.info(`Player exist with playerId: ${playerId}
+         in team ${teamId}`);
+      const data = playerDoc.data();
+      if (data == undefined) {
+        return Promise.reject(
+            new Error(`Data not foundfor playerId ${playerId}`));
       } else {
-        functions.logger.info("Player exist with playerId: " + playerId);
-        const data = playerData.data();
-        if (data == undefined) {
-          return;
-        }
-
-        const update = playerSnapshot
-            .update(getPlayer(teamId, data, player, false));
-        promises.push(update);
+        return transaction.update(playerRef,
+            getPlayer(teamId, data, player, false));
       }
-    });
-  } catch (err) {
-    functions.logger.error(err);
-  }
-  return promises;
+    }
+  };
+
+  // const wait = (ms: number) => {
+  //   return new Promise((resolve) => setTimeout(resolve, ms));
+  // };
+
+  const wait = (ms: number) => {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  };
+
+  // const retrySlot = (retryCount: number) => {
+  //   return retryCount * 500 % 10;
+  // };
+
+  const runTransaction = async (transactionTask: any, playerId: string,
+      retryCount = 0): Promise<unknown> => {
+    try {
+      if (retryCount > 0) {
+        functions.logger.info(`Retrying this transaction for ${retryCount}`);
+      }
+      const trans = await admin.firestore().runTransaction(transactionTask);
+      functions.logger.info("Transaction success.", trans);
+      return null;
+    } catch (error) {
+      functions.logger.warn(`Transaction failure. Retry count: ${retryCount}
+          PlayerId: ${playerId}`, error);
+      if (error.code === 10) {
+        if (retryCount < 5) {
+          retryCount++;
+          functions.logger.error(`Transaction error occured. 
+          Running it again after ${retryCount} retries.`);
+          await wait(1000);
+          return runTransaction(transactionTask, playerId, retryCount);
+        }
+      }
+      return Promise.reject(new Error("Transaction could not be completed."));
+    }
+  };
+  await runTransaction(transactionTask, playerId, 0);
 }
 
 /**
@@ -153,7 +172,7 @@ function getPlayer(teamId: number, currentData: any,
   let penaltyWon = defaultIfNotDefined(currentData.penalty.won);
   let penaltyCommitted = defaultIfNotDefined(currentData.penalty.committed);
   let penaltySaved = defaultIfNotDefined(currentData.penalty.saved);
-  let penaltySuccess = defaultIfNotDefined(currentData.penalty.sucess);
+  let penaltySuccess = defaultIfNotDefined(currentData.penalty.success);
   let penaltyMissed = defaultIfNotDefined(currentData.penalty.missed);
 
   if (isNew) {
