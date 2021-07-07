@@ -1,6 +1,5 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import {firestore} from "firebase-admin";
 
 export const onFixturePlayerStatCreate = functions.firestore
     .document("/football-leagues/premierleague/leagues/{leagueId}" +
@@ -19,19 +18,14 @@ export const onFixturePlayerStatCreate = functions.firestore
       if (ref == null || ref == undefined) {
         return;
       }
-      functions.logger.info("Path:" + ref.path);
-      functions.logger.info(`Home Team ID: ${homeTeam.team_id}
-         Away Team ID: ${awayTeam.team_id}`);
-
       if (homeTeam.team_id) {
         const teamSnapshot = await ref.collection("/teams")
             .where("team_id", "==", homeTeam.team_id).get();
         if (teamSnapshot.empty) {
           functions.logger.info("No matching team documents.");
         } else {
-          functions.logger.debug("Home Team: " + homeTeam.team_id);
           const teamId: number = homeTeam.team_id;
-          await updateAllPlayers(leagueId, teamId, homeTeam);
+          updateAllPlayers(leagueId, teamId, homeTeam);
         }
       }
 
@@ -41,13 +35,27 @@ export const onFixturePlayerStatCreate = functions.firestore
         if (teamSnapshot.empty) {
           functions.logger.info("No matching team documents.");
         } else {
-          functions.logger.debug("Home Team: " + homeTeam.team_id);
           const teamId: number = awayTeam.team_id;
-          await updateAllPlayers(leagueId, teamId, awayTeam);
+          updateAllPlayers(leagueId, teamId, awayTeam);
         }
       }
-      return;
+      return null;
     });
+
+/**
+ * The async/await for loop
+ * @param {any} array The array of elements
+ * @param {any} callback The callback function for each element
+ */
+const asyncForEach = async (array: any, callback: any) => {
+  for (let index = 0; index < array.length; index++) {
+    await callback(array[index], index, array);
+  }
+};
+
+// const wait = (ms: number) => {
+//   return new Promise((resolve) => setTimeout(resolve, ms));
+// };
 
 /**
  * Update player information in squad collection
@@ -56,11 +64,16 @@ export const onFixturePlayerStatCreate = functions.firestore
  * @param {any} team Team data
  * @param {QueryDocumentSnapshot} snapshot Snapshot of trigger document
  */
-async function updateAllPlayers(leagueId: number, teamId: number, team: any) {
+function updateAllPlayers(leagueId: number, teamId: number, team: any) {
   const players = team["statistics"];
-  players.forEach(async function(player:any) {
-    await updatePlayer(leagueId, teamId, player);
-  });
+  functions.logger.info(`Total players for 
+      team ${teamId} is ${players.length}`);
+  const start = async () => {
+    asyncForEach(players, async (player: any) => {
+      await updatePlayer(leagueId, teamId, player);
+    });
+  };
+  start();
 }
 
 /**
@@ -71,110 +84,114 @@ async function updateAllPlayers(leagueId: number, teamId: number, team: any) {
  */
 async function updatePlayer(leagueId: number, teamId: number, player: any) {
   const playerId:string = player.player_id;
-  functions.logger.info(`TeamID: ${teamId} PlayerID: ${playerId}`);
+  functions.logger.debug(`TeamID: ${teamId} PlayerID: ${playerId}`);
   const playerRef = admin.firestore()
       .collection("/football-leagues/premierleague/leagues/" +
           leagueId + "/teams/teamId_" + teamId + "/squad").doc(""+playerId);
-  const transactionTask = async (transaction: firestore.Transaction) => {
-    const playerDoc = await transaction.get(playerRef);
-    if (!playerDoc.exists) {
+  const playerDocument = await playerRef.get();
+  try {
+    if (!playerDocument.exists) {
       functions.logger.info(`Player does not exist in team ${teamId}.
         Creating a new document for playerId: ${playerId}`);
-      return transaction.set(playerRef, getPlayer(teamId,
-          player, undefined, true), {merge: true});
+      try {
+        await playerRef.create(getPlayer(teamId,
+            player, true));
+        return Promise.resolve("Player updated successfully.");
+      } catch (err) {
+        functions.logger.info("Player exists. Updating...", err);
+        console.log("Player: %j", player);
+        return playerRef.update(playerUpdatedata(player));
+      }
     } else {
-      functions.logger.info(`Player exist with playerId: ${playerId}
-         in team ${teamId}`);
-      const data = playerDoc.data();
-      if (data == undefined) {
-        return Promise.reject(
-            new Error(`Data not foundfor playerId ${playerId}`));
-      } else {
-        return transaction.update(playerRef,
-            getPlayer(teamId, data, player, false));
-      }
+      console.log("Player: %j", player);
+      return playerRef.update(playerUpdatedata(player));
     }
+  } catch (err) {
+    functions.logger.error(err);
+    return Promise.reject(new Error("Player update failed."));
+  }
+}
+
+/**
+ * Prepares data to update player statistics
+ * @param {any} player
+ * @return {FirebaseFirestore.UpdateData}
+ */
+function playerUpdatedata(player: any): FirebaseFirestore.UpdateData {
+  const data:FirebaseFirestore.UpdateData = {
+    "minutes_played": increment(defaultVal(player.minutes_played)),
+    "substitute": increment(getSubstituteVal(player.substitute)),
+    "offsides": increment(defaultVal(player.offsides)),
+    "shots.total": increment(defaultVal(player.shots.total)),
+    "shots.on": increment(defaultVal(player.shots.on)),
+    "fouls.committed": increment(defaultVal(player.fouls.committed)),
+    "fouls.drawn": increment(defaultVal(player.fouls.drawn)),
+    "goals.assists": increment(defaultVal(player.goals.assists)),
+    "goals.total": increment(defaultVal(player.goals.total)),
+    "goals.saves": increment(defaultVal(player.goals.saves)),
+    "goals.conceded": increment(defaultVal(player.goals.conceded)),
+    "passes.accuracy": increment(defaultVal(player.passes.accuracy)),
+    "passes.total": increment(defaultVal(player.passes.total)),
+    "passes.key": increment(defaultVal(player.passes.key)),
+    "tackles.total": increment(defaultVal(player.tackles.total)),
+    "tackles.blocks": increment(defaultVal(player.tackles.blocks)),
+    "tackles.interceptions":
+      increment(defaultVal(player.tackles.interceptions)),
+    "duels.total": increment(defaultVal(player.duels.total)),
+    "duels.won": increment(defaultVal(player.duels.won)),
+    "dribbles.attempts": increment(defaultVal(player.dribbles.attempts)),
+    "dribbles.success": increment(defaultVal(player.dribbles.success)),
+    "dribbles.past": increment(defaultVal(player.dribbles.past)),
+    "cards.yellow": increment(defaultVal(player.cards.yellow)),
+    "cards.red": increment(defaultVal(player.cards.red)),
+    "penalty.won": increment(defaultVal(player.penalty.won)),
+    "penalty.success": increment(defaultVal(player.penalty.success)),
+    "penalty.missed": increment(defaultVal(player.penalty.missed)),
+    "penalty.committed": increment(defaultVal(player.penalty.committed)),
+    "penalty.saved": increment(defaultVal(player.penalty.saved)),
   };
-
-  // const wait = (ms: number) => {
-  //   return new Promise((resolve) => setTimeout(resolve, ms));
-  // };
-
-  const wait = (ms: number) => {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  };
-
-  // const retrySlot = (retryCount: number) => {
-  //   return retryCount * 500 % 10;
-  // };
-
-  const runTransaction = async (transactionTask: any, playerId: string,
-      retryCount = 0): Promise<unknown> => {
-    try {
-      if (retryCount > 0) {
-        functions.logger.info(`Retrying this transaction for ${retryCount}`);
-      }
-      const trans = await admin.firestore().runTransaction(transactionTask);
-      functions.logger.info("Transaction success.", trans);
-      return null;
-    } catch (error) {
-      functions.logger.warn(`Transaction failure. Retry count: ${retryCount}
-          PlayerId: ${playerId}`, error);
-      if (error.code === 10) {
-        if (retryCount < 5) {
-          retryCount++;
-          functions.logger.error(`Transaction error occured. 
-          Running it again after ${retryCount} retries.`);
-          await wait(1000);
-          return runTransaction(transactionTask, playerId, retryCount);
-        }
-      }
-      return Promise.reject(new Error("Transaction could not be completed."));
-    }
-  };
-  await runTransaction(transactionTask, playerId, 0);
+  return data;
 }
 
 /**
  * Get player for the team
  * @param {number} teamId The team ID
  * @param {any} currentData The current player data
- * @param {any} updateData The update player data
  * @param {boolean} isNew The flag to identify create or update
  * @return {FirebaseFirestore.DocumentData} Firestore document data
  */
-function getPlayer(teamId: number, currentData: any,
-    updateData: any, isNew: boolean): any {
-  const data: FirebaseFirestore.DocumentData = {};
-  let totalShots = defaultIfNotDefined(currentData.shots.total);
-  let shotsOnTarget = defaultIfNotDefined(currentData.shots.on);
-  let foulsCommitted = defaultIfNotDefined(currentData.fouls.committed);
-  let foulsDrawn = defaultIfNotDefined(currentData.fouls.drawn);
-  let goalsTotal = defaultIfNotDefined(currentData.goals.total);
-  let goalsSaves = defaultIfNotDefined(currentData.goals.saves);
-  let goalsAssists = defaultIfNotDefined(currentData.goals.assists);
-  let goalsConceded = defaultIfNotDefined(currentData.goals.conceded);
-  let passingAccuracy = defaultIfNotDefined(currentData.passes.accuracy);
-  let passingTotal = defaultIfNotDefined(currentData.passes.total);
-  let keyPasses = defaultIfNotDefined(currentData.passes.key);
-  let tackles = defaultIfNotDefined(currentData.tackles.total);
-  let blocks = defaultIfNotDefined(currentData.tackles.blocks);
-  let interceptions = defaultIfNotDefined(currentData.tackles.interceptions);
-  let duelsTotal = defaultIfNotDefined(currentData.duels.total);
-  let duelsWon = defaultIfNotDefined(currentData.duels.won);
-  let substitute = getSubstituteVal(currentData.substitute);
-  let minutesPlayer = defaultIfNotDefined(currentData.minutes_played);
-  let dribblesAttempts = defaultIfNotDefined(currentData.dribbles.attempts);
-  let dribblesSuccess = defaultIfNotDefined(currentData.dribbles.success);
-  let dribblesPast = defaultIfNotDefined(currentData.dribbles.past);
-  let yellowCard = defaultIfNotDefined(currentData.cards.yellow);
-  let redCard = defaultIfNotDefined(currentData.cards.red);
-  let penaltyWon = defaultIfNotDefined(currentData.penalty.won);
-  let penaltyCommitted = defaultIfNotDefined(currentData.penalty.committed);
-  let penaltySaved = defaultIfNotDefined(currentData.penalty.saved);
-  let penaltySuccess = defaultIfNotDefined(currentData.penalty.success);
-  let penaltyMissed = defaultIfNotDefined(currentData.penalty.missed);
-
+function getPlayer(teamId: number, currentData: any, isNew: boolean): any {
+  const totalShots = defaultVal(currentData.shots.total);
+  const shotsOnTarget = defaultVal(currentData.shots.on);
+  const foulsCommitted = defaultVal(currentData.fouls.committed);
+  const foulsDrawn = defaultVal(currentData.fouls.drawn);
+  const goalsTotal = defaultVal(currentData.goals.total);
+  const goalsSaves = defaultVal(currentData.goals.saves);
+  const goalsAssists = defaultVal(currentData.goals.assists);
+  const goalsConceded = defaultVal(currentData.goals.conceded);
+  const passingAccuracy = defaultVal(currentData.passes.accuracy);
+  const passingTotal = defaultVal(currentData.passes.total);
+  const keyPasses = defaultVal(currentData.passes.key);
+  const tackles = defaultVal(currentData.tackles.total);
+  const blocks = defaultVal(currentData.tackles.blocks);
+  const interceptions =
+      defaultVal(currentData.tackles.interceptions);
+  const duelsTotal = defaultVal(currentData.duels.total);
+  const duelsWon = defaultVal(currentData.duels.won);
+  const substitute = getSubstituteVal(currentData.substitute);
+  const minutesPlayer = defaultVal(currentData.minutes_played);
+  const dribblesAttempts = defaultVal(currentData.dribbles.attempts);
+  const dribblesSuccess = defaultVal(currentData.dribbles.success);
+  const dribblesPast = defaultVal(currentData.dribbles.past);
+  const yellowCard = defaultVal(currentData.cards.yellow);
+  const redCard = defaultVal(currentData.cards.red);
+  const penaltyWon = defaultVal(currentData.penalty.won);
+  const penaltyCommitted = defaultVal(currentData.penalty.committed);
+  const penaltySaved = defaultVal(currentData.penalty.saved);
+  const penaltySuccess = defaultVal(currentData.penalty.success);
+  const penaltyMissed = defaultVal(currentData.penalty.missed);
+  const offsides = defaultVal(currentData.offsides);
+  const data: FirebaseFirestore.UpdateData = {};
   if (isNew) {
     data.player_id = currentData.player_id;
     data.player_name = currentData.player_name;
@@ -183,39 +200,10 @@ function getPlayer(teamId: number, currentData: any,
     data.number = currentData.number;
     data.minutes_played = currentData.minutes_played;
   }
-  if (updateData) {
-    substitute += getSubstituteVal(updateData.substitue);
-    minutesPlayer += defaultIfNotDefined(updateData.minutes_played);
-    totalShots += defaultIfNotDefined(updateData.shots.total);
-    shotsOnTarget += defaultIfNotDefined(updateData.shots.on);
-    foulsCommitted += defaultIfNotDefined(updateData.fouls.committed);
-    foulsDrawn += defaultIfNotDefined(updateData.fouls.drawn);
-    goalsTotal += defaultIfNotDefined(updateData.goals.total);
-    goalsSaves += defaultIfNotDefined(updateData.goals.saves);
-    goalsAssists += defaultIfNotDefined(updateData.goals.assists);
-    goalsConceded += defaultIfNotDefined(updateData.goals.conceded);
-    passingAccuracy += defaultIfNotDefined(updateData.passes.accuracy);
-    passingTotal += defaultIfNotDefined(updateData.passes.total);
-    keyPasses += defaultIfNotDefined(updateData.passes.key);
-    tackles += defaultIfNotDefined(updateData.tackles.total);
-    blocks += defaultIfNotDefined(updateData.tackles.blocks);
-    interceptions += defaultIfNotDefined(updateData.tackles.interceptions);
-    duelsTotal += defaultIfNotDefined(updateData.duels.total);
-    duelsWon += defaultIfNotDefined(updateData.duels.won);
-    dribblesAttempts += defaultIfNotDefined(updateData.dribbles.attempts);
-    dribblesSuccess += defaultIfNotDefined(updateData.dribbles.success);
-    dribblesPast += defaultIfNotDefined(updateData.dribbles.past);
-    yellowCard += defaultIfNotDefined(updateData.cards.yellow);
-    redCard += defaultIfNotDefined(updateData.cards.red);
-    penaltyWon += defaultIfNotDefined(updateData.penalty.won);
-    penaltyCommitted += defaultIfNotDefined(updateData.penalty.committed);
-    penaltySaved += defaultIfNotDefined(updateData.penalty.saved);
-    penaltyMissed += defaultIfNotDefined(updateData.penalty.missed);
-    penaltySuccess += defaultIfNotDefined(updateData.penalty.success);
-  }
 
-  data.substitue = substitute;
+  data.substitute = substitute;
   data.minutes_played = minutesPlayer;
+  data.offsides = offsides;
   data.shots = {
     total: totalShots,
     on: shotsOnTarget,
@@ -264,31 +252,12 @@ function getPlayer(teamId: number, currentData: any,
 }
 
 /**
- * Get sum of two values
- * @param {any} currentPropertyValue Current property
- * @param {any} existingPropertyValue New Property
- * @return {number} Sum of two values
- */
-// function getTotalValue(currentPropertyValue: any,
-//     existingPropertyValue: any): number {
-//   let sum = 0;
-//   if (currentPropertyValue) {
-//     sum += currentPropertyValue;
-//   }
-//   if (existingPropertyValue) {
-//     sum += existingPropertyValue;
-//   }
-//   functions.logger.debug("Sum: " + sum);
-//   return sum;
-// }
-
-/**
  * Return default value when undefined
  * @param {number|undefined} value The value
  * @return {number} The passed value or default value
  */
-function defaultIfNotDefined(value: number | undefined): number {
-  if (value) {
+function defaultVal(value: number | undefined): number {
+  if (typeof value != "undefined" && value) {
     return value;
   }
   return 0;
@@ -300,8 +269,22 @@ function defaultIfNotDefined(value: number | undefined): number {
  * @return {number} The passed value or default value
  */
 function getSubstituteVal(value: string | undefined): number {
-  if (value && value.toLocaleLowerCase() == "true") {
+  if (typeof value != "undefined" && value &&
+        value.toLocaleLowerCase() == "true") {
     return 1;
   }
   return 0;
+}
+
+/**
+ * Return Firebase.FieldValue increment
+ * @param {number} val The number
+ * @return {FirebaseFirestore.FieldValue}
+ */
+function increment(val: number): FirebaseFirestore.FieldValue {
+  if (typeof val != "number") {
+    console.log("Not a number", val);
+    val = 0;
+  }
+  return admin.firestore.FieldValue.increment(val);
 }
