@@ -12,34 +12,40 @@ export const onFixturePlayerStatCreate = functions.firestore
       const data = snapshot.data();
       const homeTeam = data["home_team"];
       const awayTeam = data["away_team"];
-
+      const promises = [];
       // teams collection
-      const ref = snapshot.ref.parent.parent?.parent.parent;
-      if (ref == null || ref == undefined) {
-        return;
-      }
-      if (homeTeam.team_id) {
-        const teamSnapshot = await ref.collection("/teams")
-            .where("team_id", "==", homeTeam.team_id).get();
-        if (teamSnapshot.empty) {
-          functions.logger.info("No matching team documents.");
-        } else {
-          const teamId: number = homeTeam.team_id;
-          updateAllPlayers(leagueId, teamId, homeTeam);
+      try {
+        const ref = snapshot.ref.parent.parent?.parent.parent;
+        if (ref == null || ref == undefined) {
+          return;
         }
-      }
+        if (homeTeam.team_id) {
+          const teamSnapshot = await ref.collection("/teams")
+              .where("team_id", "==", homeTeam.team_id).get();
+          if (teamSnapshot.empty) {
+            functions.logger.info("No matching team documents.");
+          } else {
+            const teamId: number = homeTeam.team_id;
+            const h = updateAllPlayers(leagueId, teamId, homeTeam);
+            promises.push(h);
+          }
+        }
 
-      if (awayTeam.team_id) {
-        const teamSnapshot = await ref.collection("/teams")
-            .where("team_id", "==", awayTeam.team_id).get();
-        if (teamSnapshot.empty) {
-          functions.logger.info("No matching team documents.");
-        } else {
-          const teamId: number = awayTeam.team_id;
-          updateAllPlayers(leagueId, teamId, awayTeam);
+        if (awayTeam.team_id) {
+          const teamSnapshot = await ref.collection("/teams")
+              .where("team_id", "==", awayTeam.team_id).get();
+          if (teamSnapshot.empty) {
+            functions.logger.info("No matching team documents.");
+          } else {
+            const teamId: number = awayTeam.team_id;
+            const a = updateAllPlayers(leagueId, teamId, awayTeam);
+            promises.push(a);
+          }
         }
+        return await Promise.all(promises);
+      } catch (err) {
+        return Promise.reject(err);
       }
-      return null;
     });
 
 /**
@@ -64,46 +70,66 @@ const asyncForEach = async (array: any, callback: any) => {
  * @param {any} team Team data
  * @param {QueryDocumentSnapshot} snapshot Snapshot of trigger document
  */
-function updateAllPlayers(leagueId: number, teamId: number, team: any) {
+async function updateAllPlayers(leagueId: number, teamId: number, team: any) {
   const players = team["statistics"];
+  const teamName = team["team_name"];
   functions.logger.info(`Total players for 
       team ${teamId} is ${players.length}`);
-  const start = async () => {
-    asyncForEach(players, async (player: any) => {
-      await updatePlayer(leagueId, teamId, player);
-    });
-  };
-  start();
+  const promises: any[] = [];
+  try {
+    const start = async () => {
+      asyncForEach(players, async (player: any) => {
+        const p = updatePlayer(leagueId, teamId, teamName, player);
+        promises.push(p);
+      });
+    };
+    start();
+    return await Promise.all(promises);
+  } catch (err) {
+    return Promise.reject(err);
+  }
 }
 
 /**
  * Create or update a player data
  * @param {number} leagueId
  * @param {number} teamId
+ * @param {string} teamName
  * @param {any} player
  */
-async function updatePlayer(leagueId: number, teamId: number, player: any) {
-  const playerId:string = player.player_id;
+async function updatePlayer(leagueId: number, teamId: number,
+    teamName: string, player: any) {
+  const playerId: string = player.player_id;
+  const playerName: string = player.player_name;
+  const teamDocumentId: string = getDocumentID("" + teamId, teamName);
+  const playerDocumentId: string = getDocumentID(playerId, playerName);
   functions.logger.debug(`TeamID: ${teamId} PlayerID: ${playerId}`);
   const playerRef = admin.firestore()
       .collection("/football-leagues/premierleague/leagues/" +
-          leagueId + "/teams/teamId_" + teamId + "/squad").doc(""+playerId);
+          leagueId + "/teams/" + teamDocumentId + "/squad")
+      .doc(playerDocumentId);
   const playerDocument = await playerRef.get();
   try {
     if (!playerDocument.exists) {
       functions.logger.info(`Player does not exist in team ${teamId}.
         Creating a new document for playerId: ${playerId}`);
+      console.log("Player: %j", player);
       try {
-        await playerRef.create(getPlayer(teamId,
+        return playerRef.create(getPlayer(teamId,
             player, true));
-        return Promise.resolve("Player updated successfully.");
       } catch (err) {
-        functions.logger.info("Player exists. Updating...", err);
-        console.log("Player: %j", player);
-        return playerRef.update(playerUpdatedata(player));
+        functions.logger.info(`Player ${playerId} exists.`, err);
+        functions.logger.info(`Updating Player ${playerId}`);
+        try {
+          return playerRef.update(playerUpdatedata(player));
+        } catch (err) {
+          functions.logger.error(`Error while updating player 
+              ${playerId} from team ${teamId}`, err);
+          return Promise.reject(new Error("Player could not be updated."));
+        }
       }
     } else {
-      console.log("Player: %j", player);
+      functions.logger.debug(`Player ${playerId} updated.`);
       return playerRef.update(playerUpdatedata(player));
     }
   } catch (err) {
@@ -287,4 +313,14 @@ function increment(val: number): FirebaseFirestore.FieldValue {
     val = 0;
   }
   return admin.firestore.FieldValue.increment(val);
+}
+
+/**
+ * Gets Document ID
+ * @param {string} id
+ * @param {string} name
+ * @return {string} ID concatenated with Name
+ */
+function getDocumentID(id: string, name: string): string {
+  return id + "#" + name.toLocaleUpperCase();
 }
