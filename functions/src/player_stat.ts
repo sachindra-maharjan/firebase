@@ -145,6 +145,7 @@ async function updatePlayer(leagueId: number, teamId: number,
  */
 function playerUpdatedata(player: any): FirebaseFirestore.UpdateData {
   const data:FirebaseFirestore.UpdateData = {
+    "games_played": increment(played(player.minutes_played)),
     "minutes_played": increment(defaultVal(player.minutes_played)),
     "substitute": increment(getSubstituteVal(player.substitute)),
     "offsides": increment(defaultVal(player.offsides)),
@@ -227,6 +228,7 @@ function getPlayer(teamId: number, currentData: any, isNew: boolean): any {
     data.minutes_played = currentData.minutes_played;
   }
 
+  data.games_played = played(minutesPlayer);
   data.substitute = substitute;
   data.minutes_played = minutesPlayer;
   data.offsides = offsides;
@@ -323,4 +325,13 @@ function increment(val: number): FirebaseFirestore.FieldValue {
  */
 function getDocumentID(id: string, name: string): string {
   return id + "#" + name.toLocaleUpperCase();
+}
+
+/**
+ * Check if player played the game
+ * @param {number} val
+ * @return {boolean} 1 when val > 0, otherwise 0
+ */
+function played(val: number): number {
+  return defaultVal(val) > 0 ? 1 : 0;
 }
