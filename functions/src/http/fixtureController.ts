@@ -1,7 +1,8 @@
 import {Request, Response} from "express";
 import {db} from "../config/firestore";
 
-const getAllFixturesForLeague = async (req: Request, res: Response) => {
+const getAllFixturesForLeague = async (req: Request, res: Response):
+    Promise<Response<any, Record<string, any>>> => {
   const {params: {leagueId}} = req;
   console.log(`leagueId: ${leagueId}`);
 

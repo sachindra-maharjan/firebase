@@ -14,7 +14,7 @@ module.exports = {
   ],
   parser: "@typescript-eslint/parser",
   parserOptions: {
-    project: ["firebase/functions/tsconfig.json", "firebase/functions/tsconfig.dev.json"],
+    project: ["tsconfig.json", "tsconfig.dev.json"],
     sourceType: "module",
   },
   ignorePatterns: [
@@ -23,10 +23,10 @@ module.exports = {
   plugins: [
     "@typescript-eslint",
     "import",
-    "prettier"
+    "prettier",
   ],
   rules: {
-    quotes: ["error", "double"],
-    "no-unused-vars": "warn"
+    "quotes": ["error", "double"],
+    "no-unused-vars": "warn",
   },
 };

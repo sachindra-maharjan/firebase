@@ -1,7 +1,8 @@
 import {Request, Response} from "express";
 import {db} from "../config/firestore";
 
-const getLeagues = async (req: Request, res: Response) => {
+const getLeagues = async (req: Request, res: Response):
+    Promise<Response<any, Record<string, any>>> => {
   try {
     const snapshots = await db.doc("/football-leagues/premierleague")
         .collection("/leagues").get();
