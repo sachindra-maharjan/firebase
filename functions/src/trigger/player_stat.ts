@@ -4,7 +4,7 @@ import * as admin from "firebase-admin";
 export const onFixturePlayerStatCreate = functions.firestore
   .document(
     "/football/premierleague/leagues/{leagueId}" +
-      "/fixtures/{fixtureId}/fixtureDetails/playerStat"
+      "/fixtures/{fixtureId}/fixtureDetails/playerStatistics"
   )
   .onCreate(async (snapshot, context) => {
     const leagueId = context.params.leagueId;
