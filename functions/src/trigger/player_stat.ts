@@ -3,7 +3,7 @@ import * as admin from "firebase-admin";
 
 export const onFixturePlayerStatCreate = functions.firestore
   .document(
-    "/football/premierleague/leagues/{leagueId}" +
+    "/football/{league}/leagues/{leagueId}" +
       "/fixtures/{fixtureId}/fixtureDetails/playerStatistics"
   )
   .onCreate(async (snapshot, context) => {
@@ -20,29 +20,29 @@ export const onFixturePlayerStatCreate = functions.firestore
       if (ref == null || ref == undefined) {
         return;
       }
-      if (homeTeam.team_id) {
+      if (homeTeam.teamId) {
         const teamSnapshot = await ref
           .collection("/teams")
-          .where("team_id", "==", homeTeam.team_id)
+          .where("teamId", "==", homeTeam.teamId)
           .get();
         if (teamSnapshot.empty) {
           functions.logger.info("No matching team documents.");
         } else {
-          const teamId: number = homeTeam.team_id;
+          const teamId: number = homeTeam.teamId;
           const h = updateAllPlayers(leagueId, teamId, homeTeam);
           promises.push(h);
         }
       }
 
-      if (awayTeam.team_id) {
+      if (awayTeam.teamId) {
         const teamSnapshot = await ref
           .collection("/teams")
-          .where("teamId", "==", awayTeam.team_id)
+          .where("teamId", "==", awayTeam.teamId)
           .get();
         if (teamSnapshot.empty) {
           functions.logger.info("No matching team documents.");
         } else {
-          const teamId: number = awayTeam.team_id;
+          const teamId: number = awayTeam.teamId;
           const a = updateAllPlayers(leagueId, teamId, awayTeam);
           promises.push(a);
         }
@@ -102,17 +102,27 @@ async function updateAllPlayers(leagueId: number, teamId: number, team: any) {
  * @param {string} teamName
  * @param {any} player
  */
-async function updatePlayer(leagueId: number, teamId: number,
-    teamName: string, player: any) {
-  const playerId: string = player.player_id;
-  const playerName: string = player.player_name;
+async function updatePlayer(
+  leagueId: number,
+  teamId: number,
+  teamName: string,
+  player: any
+) {
+  const playerId: string = player.playerId;
+  const playerName: string = player.playerName;
   const teamDocumentId: string = getDocumentID("" + teamId, teamName);
   const playerDocumentId: string = getDocumentID(playerId, playerName);
   functions.logger.debug(`TeamID: ${teamId} PlayerID: ${playerId}`);
-  const playerRef = admin.firestore()
-      .collection("/football/premierleague/leagues/" +
-          leagueId + "/teams/" + teamDocumentId + "/squad")
-      .doc(playerDocumentId);
+  const playerRef = admin
+    .firestore()
+    .collection(
+      "/football/premierleague/leagues/" +
+        leagueId +
+        "/teams/" +
+        teamDocumentId +
+        "/squad"
+    )
+    .doc(playerDocumentId);
   const playerDocument = await playerRef.get();
   try {
     if (!playerDocument.exists) {
@@ -120,16 +130,18 @@ async function updatePlayer(leagueId: number, teamId: number,
         Creating a new document for playerId: ${playerId}`);
       console.log("Player: %j", player);
       try {
-        return playerRef.create(getPlayer(teamId,
-            player, true));
+        return playerRef.create(getPlayer(teamId, player, true));
       } catch (err) {
         functions.logger.info(`Player ${playerId} exists.`, err);
         functions.logger.info(`Updating Player ${playerId}`);
         try {
           return playerRef.update(playerUpdatedata(player));
         } catch (err) {
-          functions.logger.error(`Error while updating player 
-              ${playerId} from team ${teamId}`, err);
+          functions.logger.error(
+            `Error while updating player 
+              ${playerId} from team ${teamId}`,
+            err
+          );
           return Promise.reject(new Error("Player could not be updated."));
         }
       }
