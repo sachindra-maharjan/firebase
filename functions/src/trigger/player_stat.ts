@@ -2,51 +2,56 @@ import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
 export const onFixturePlayerStatCreate = functions.firestore
-    .document("/football-leagues/premierleague/leagues/{leagueId}" +
-      "/fixtures/{fixtureId}/fixture_details/player_stat")
-    .onCreate( async (snapshot, context) =>{
-      const leagueId = context.params.leagueId;
-      const fixtureId = context.params.fixtureId;
-      functions.logger
-          .info(`League id: ${leagueId} Fixuture Id: ${fixtureId}`);
-      const data = snapshot.data();
-      const homeTeam = data["home_team"];
-      const awayTeam = data["away_team"];
-      const promises = [];
-      // teams collection
-      try {
-        const ref = snapshot.ref.parent.parent?.parent.parent;
-        if (ref == null || ref == undefined) {
-          return;
-        }
-        if (homeTeam.team_id) {
-          const teamSnapshot = await ref.collection("/teams")
-              .where("team_id", "==", homeTeam.team_id).get();
-          if (teamSnapshot.empty) {
-            functions.logger.info("No matching team documents.");
-          } else {
-            const teamId: number = homeTeam.team_id;
-            const h = updateAllPlayers(leagueId, teamId, homeTeam);
-            promises.push(h);
-          }
-        }
-
-        if (awayTeam.team_id) {
-          const teamSnapshot = await ref.collection("/teams")
-              .where("team_id", "==", awayTeam.team_id).get();
-          if (teamSnapshot.empty) {
-            functions.logger.info("No matching team documents.");
-          } else {
-            const teamId: number = awayTeam.team_id;
-            const a = updateAllPlayers(leagueId, teamId, awayTeam);
-            promises.push(a);
-          }
-        }
-        return await Promise.all(promises);
-      } catch (err) {
-        return Promise.reject(err);
+  .document(
+    "/football/premierleague/leagues/{leagueId}" +
+      "/fixtures/{fixtureId}/fixtureDetails/playerStat"
+  )
+  .onCreate(async (snapshot, context) => {
+    const leagueId = context.params.leagueId;
+    const fixtureId = context.params.fixtureId;
+    functions.logger.info(`League id: ${leagueId} Fixuture Id: ${fixtureId}`);
+    const data = snapshot.data();
+    const homeTeam = data["homeTeam"];
+    const awayTeam = data["awayTeam"];
+    const promises = [];
+    // teams collection
+    try {
+      const ref = snapshot.ref.parent.parent?.parent.parent;
+      if (ref == null || ref == undefined) {
+        return;
       }
-    });
+      if (homeTeam.team_id) {
+        const teamSnapshot = await ref
+          .collection("/teams")
+          .where("team_id", "==", homeTeam.team_id)
+          .get();
+        if (teamSnapshot.empty) {
+          functions.logger.info("No matching team documents.");
+        } else {
+          const teamId: number = homeTeam.team_id;
+          const h = updateAllPlayers(leagueId, teamId, homeTeam);
+          promises.push(h);
+        }
+      }
+
+      if (awayTeam.team_id) {
+        const teamSnapshot = await ref
+          .collection("/teams")
+          .where("teamId", "==", awayTeam.team_id)
+          .get();
+        if (teamSnapshot.empty) {
+          functions.logger.info("No matching team documents.");
+        } else {
+          const teamId: number = awayTeam.team_id;
+          const a = updateAllPlayers(leagueId, teamId, awayTeam);
+          promises.push(a);
+        }
+      }
+      return await Promise.all(promises);
+    } catch (err) {
+      return Promise.reject(err);
+    }
+  });
 
 /**
  * The async/await for loop
@@ -72,7 +77,7 @@ const asyncForEach = async (array: any, callback: any) => {
  */
 async function updateAllPlayers(leagueId: number, teamId: number, team: any) {
   const players = team["statistics"];
-  const teamName = team["team_name"];
+  const teamName = team["teamName"];
   functions.logger.info(`Total players for 
       team ${teamId} is ${players.length}`);
   const promises: any[] = [];
@@ -105,7 +110,7 @@ async function updatePlayer(leagueId: number, teamId: number,
   const playerDocumentId: string = getDocumentID(playerId, playerName);
   functions.logger.debug(`TeamID: ${teamId} PlayerID: ${playerId}`);
   const playerRef = admin.firestore()
-      .collection("/football-leagues/premierleague/leagues/" +
+      .collection("/football/premierleague/leagues/" +
           leagueId + "/teams/" + teamDocumentId + "/squad")
       .doc(playerDocumentId);
   const playerDocument = await playerRef.get();
@@ -145,8 +150,8 @@ async function updatePlayer(leagueId: number, teamId: number,
  */
 function playerUpdatedata(player: any): FirebaseFirestore.UpdateData {
   const data:FirebaseFirestore.UpdateData = {
-    "games_played": increment(played(player.minutes_played)),
-    "minutes_played": increment(defaultVal(player.minutes_played)),
+    "gamesPlayed": increment(played(player.minutesPlayed)),
+    "minutesPlayed": increment(defaultVal(player.minutesPlayed)),
     "substitute": increment(getSubstituteVal(player.substitute)),
     "offsides": increment(defaultVal(player.offsides)),
     "shots.total": increment(defaultVal(player.shots.total)),
@@ -206,7 +211,7 @@ function getPlayer(teamId: number, currentData: any, isNew: boolean): any {
   const duelsTotal = defaultVal(currentData.duels.total);
   const duelsWon = defaultVal(currentData.duels.won);
   const substitute = getSubstituteVal(currentData.substitute);
-  const minutesPlayer = defaultVal(currentData.minutes_played);
+  const minutesPlayer = defaultVal(currentData.minutesPlayed);
   const dribblesAttempts = defaultVal(currentData.dribbles.attempts);
   const dribblesSuccess = defaultVal(currentData.dribbles.success);
   const dribblesPast = defaultVal(currentData.dribbles.past);
@@ -220,17 +225,17 @@ function getPlayer(teamId: number, currentData: any, isNew: boolean): any {
   const offsides = defaultVal(currentData.offsides);
   const data: FirebaseFirestore.UpdateData = {};
   if (isNew) {
-    data.player_id = currentData.player_id;
-    data.player_name = currentData.player_name;
-    data.team_id = teamId;
+    data.playerId = currentData.playerId;
+    data.playerName = currentData.playerName;
+    data.teamId = teamId;
     data.position = currentData.position;
     data.number = currentData.number;
-    data.minutes_played = currentData.minutes_played;
+    data.minutesPlayed = currentData.minutesPlayed;
   }
 
-  data.games_played = played(minutesPlayer);
+  data.gamesPlayed = played(minutesPlayer);
   data.substitute = substitute;
-  data.minutes_played = minutesPlayer;
+  data.minutesPlayed = minutesPlayer;
   data.offsides = offsides;
   data.shots = {
     total: totalShots,
