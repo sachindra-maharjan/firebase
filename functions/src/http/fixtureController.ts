@@ -21,9 +21,8 @@ const getAllFixturesForLeague = async (
       fixtures.push(snapshot.data());
     });
     return res.status(200).send(fixtures);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
-    return res.status(400).send(error.message);
+  } catch (error) {
+    return res.status(400).send(error);
   }
 };
 

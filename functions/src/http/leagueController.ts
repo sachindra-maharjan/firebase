@@ -1,5 +1,5 @@
-import {Request, Response} from "express";
-import {db} from "../config/firestore";
+import { Request, Response } from "express";
+import { db } from "../config/firestore";
 
 const getLeagues = async (
   req: Request,
@@ -15,10 +15,9 @@ const getLeagues = async (
       leagues.push(league.data());
     });
     return res.status(200).send(leagues);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
-    return res.status(500).send(error.message);
+  } catch (error) {
+    return res.status(500).send(error);
   }
 };
 
-export {getLeagues};
+export { getLeagues };

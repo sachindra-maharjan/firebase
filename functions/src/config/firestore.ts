@@ -7,4 +7,4 @@ admin.firestore().settings({
 
 const db = admin.firestore();
 
-export {admin, db};
+export { admin, db };
